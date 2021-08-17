@@ -1,6 +1,6 @@
 # MQTT
 
-EdgeX - Ireland Release
+EdgeX - Jakarta Release
 
 ## Overview
 
@@ -18,56 +18,112 @@ Run Mosquitto using the following docker command:
 
     docker run -d --rm --name broker -p 1883:1883 eclipse-mosquitto:1.6
 
+## Enabling multi-level topics in device services
+To use the optional setting for MQTT device services with multi-level
+topics, make the following changes:
+
+1. Modify these lines in `configuration.toml`:
+```yaml
+# Comment out/remove when using multi-level topics
+#IncomingTopic = 'DataTopic'
+#ResponseTopic = 'ResponseTopic'
+#UseTopicLevels = false
+
+# Uncomment to use multi-level topics
+IncomingTopic = 'incoming/data/#'
+ResponseTopic = 'command/response/#'
+UseTopicLevels = true
+```
+2. Modify`CommandTopic = 'command/MQTT-test-device'` in the `mqtt.test.device.toml`
+
+Notice the sections marked with **Using Multi-level Topic:** for relevant input/output
+throughout this example.
+
 ## Run an MQTT Device Simulator
 
 ![MQTT Device Service](EdgeX_ExamplesMQTTDeviceSimulator.png)
 
 This simulator has three behaviors:
 
-1.  Publish random number data every 15 seconds.
-    
+1. Publish random number data every 15 seconds.
+
+    **Default (single-level) Topic:** 
     The simulator publishes the data to the MQTT broker with topic `DataTopic` and the message is similar to the following:
     ```
-    {"name":"MQTT-Test-Device", "cmd":"randnum", "method":"get", "randnum":4161.3549}
+    {"name":"MQTT-test-device", "cmd":"randfloat32", "method":"get", "randfloat32":4161.3549}
     ```
-    
-2.  Receive the reading request, then return the response.
+    **Using Multi-level Topic:**
+    The simulator publishes the data to the MQTT broker with topic `incoming/data/#` and the message is similar to the following:
+    ```
+    {"randfloat32":4161.3549}
+    ```
+
+2. Receive the reading request, then return the response.
+
+    **Default (single-level) Topic:**
 
     1. The simulator receives the request from the MQTT broker, the topic is `CommandTopic` and the message is similar to the following:
-        ```   
-        {"cmd":"randnum", "method":"get", "uuid":"293d7a00-66e1-4374-ace0-07520103c95f"}
+        ```
+        {"cmd":"randfloat32", "method":"get", "uuid":"293d7a00-66e1-4374-ace0-07520103c95f"}
         ```
     2. The simulator returns the response to the MQTT broker, the topic is `ResponseTopic` and the message is similar to the following:
-        ```   
-        {"cmd":"randnum", "method":"get", "uuid":"293d7a00-66e1-4374-ace0-07520103c95f", "randnum":42.0}
         ```
-3.  Receive the set request, then change the device value.
+        {"cmd":"randfloat32", "method":"get", "uuid":"293d7a00-66e1-4374-ace0-07520103c95f", "randfloat32":42.0}
+        ```
+
+    **Using Multi-level Topic:**
+
+    1. The simulator receives the request from the MQTT broker, the topic is `command/MQTT-test-device/randfloat32` and the message is similar to the following:
+        ```
+        {"message":"42.0"}
+        ```
+    2. The simulator returns the response to the MQTT broker, the topic is `command/response/#` and the message is similar to the following:
+        ```
+        {"message":"4.20e+01"}
+        ```
+
+3. Receive the set request, then change the device value.
+   
+    **Default (single-level) Topic:**
 
     1. The simulator receives the request from the MQTT broker, the topic is `CommandTopic` and the message is similar to the following:
         ```   
         {"cmd":"message", "method":"set", "uuid":"293d7a00-66e1-4374-ace0-07520103c95f", "message":"test message..."}
         ```
     2. The simulator changes the device value and returns the response to the MQTT broker, the topic is `ResponseTopic` and the message is similar to the following:
+         ```   
+         {"cmd":"message", "method":"set", "uuid":"293d7a00-66e1-4374-ace0-07520103c95f"}
+         ```
+
+    **Using Multi-level Topic:**
+
+    1. The simulator receives the request from the MQTT broker, the topic is `command/MQTT-test-device/testmessage` and the message is similar to the following:
         ```   
-        {"cmd":"message", "method":"set", "uuid":"293d7a00-66e1-4374-ace0-07520103c95f"}
+        {"message":"test message..."}
+        ```
+    2. The simulator changes the device value and returns the response to the MQTT broker, the topic is `command/response/#` and the message is similar to the following:
+        ```   
+        {"message":"test message..."}
         ```
 
 To simulate the MQTT device, create a javascript, named `mock-device.js`, with the
 following content:
+
+**Default (single-level) Topic:**
 ```javascript
 function getRandomFloat(min, max) {
     return Math.random() * (max - min) + min;
 }
 
-const deviceName = "MQTT-Test-Device";
+const deviceName = "MQTT-test-device";
 let message = "test-message";
 
 // DataSender sends async value to MQTT broker every 15 seconds
 schedule('*/15 * * * * *', ()=>{
     let body = {
         "name": deviceName,
-        "cmd": "randnum",
-        "randnum": getRandomFloat(25,29).toFixed(1)
+        "cmd": "randfloat32",
+        "randfloat32": getRandomFloat(25,29).toFixed(1)
     };
     publish( 'DataTopic', JSON.stringify(body));
 });
@@ -77,25 +133,75 @@ schedule('*/15 * * * * *', ()=>{
 // 2. Receive the set request, then change the device value
 subscribe( "CommandTopic" , (topic, val) => {
     var data = val;
-        if (data.method == "set") {
+    if (data.method == "set") {
         message = data[data.cmd]
     }else{
         switch(data.cmd) {
             case "ping":
-              data.ping = "pong";
-              break;
-            case "message":
-              data.message = message;
-              break;
-            case "randnum":
-                data.randnum = 12.123;
+                data.ping = "pong";
                 break;
-          }
+            case "message":
+                data.message = message;
+                break;
+            case "randfloat32":
+                data.randfloat32 = 12.32;
+                break;
+            case "randfloat64":
+                data.randfloat64 = 12.64;
+                break;
+        }
     }
     publish( "ResponseTopic", JSON.stringify(data));
 });
 ```
+**Using Multi-level Topic:**
+```javascript
+function getRandomFloat(min, max) {
+    return Math.random() * (max - min) + min;
+}
 
+const deviceName = "MQTT-test-device";
+let message = "test-message";
+
+// DataSender sends async value to MQTT broker every 15 seconds
+schedule('*/15 * * * * *', ()=>{
+    let body = getRandomFloat(25,29).toFixed(1);
+    publish( 'incoming/data/MQTT-test-device/randfloat32', body);
+});
+
+// CommandHandler receives commands and sends response to MQTT broker
+// 1. Receive the reading request, then return the response
+// 2. Receive the set request, then change the device value
+subscribe( "command/MQTT-test-device/#" , (topic, val) => {
+    const words = topic.split('/');
+    var cmd = words[3];
+    var method = words[4];
+    var uuid = words[5];
+    var response = {};
+    var data = val;
+
+    if (method == "set") {
+        message = data[cmd]
+    }else{
+        switch(cmd) {
+            case "ping":
+                response.ping = "pong";
+                break;
+            case "message":
+                response.message = message;
+                break;
+            case "randfloat32":
+                response.randfloat32 = 12.123;
+                break;
+            case "randfloat64":
+                response.randfloat64 = 34.32;
+                break;
+        }
+    }
+    var sendTopic ="command/response/"+ uuid;
+    publish( sendTopic, JSON.stringify(response));
+});
+```
 To run the device simulator, enter the commands shown below with the
 following changes:
 
@@ -128,21 +234,33 @@ which can be Read or Write.
 Create a device profile, named `mqtt.test.device.profile.yml`, with the
 following content:
 ```yaml
-name: "MQTT-Test-Device-Profile"
-manufacturer: "iot"
-model: "MQTT-DEVICE"
-description: "Test device profile"
+name: "Test-Device-MQTT-Profile"
+manufacturer: "Dell"
+model: "MQTT-2"
 labels:
-  - "mqtt"
   - "test"
+description: "Test device profile"
 deviceResources:
   -
-    name: randnum
+    name: randfloat32
     isHidden: true
-    description: "device random number"
+    description: "random 32 bit float"
     properties:
       valueType: "Float32"
-      readWrite: "R"
+      readWrite: "RW"
+      defaultValue: "0.00"
+      minimum: "0.00"
+      maximum: "100.00"
+  -
+    name: randfloat64
+    isHidden: true
+    description: "random 64 bit float"
+    properties:
+      valueType: "Float64"
+      readWrite: "RW"
+      defaultValue: "0.00"
+      minimum: "0.00"
+      maximum: "100.00"
   -
     name: ping
     isHidden: true
@@ -150,23 +268,51 @@ deviceResources:
     properties:
       valueType: "String"
       readWrite: "R"
+      defaultValue: "oops"
   -
     name: message
-    isHidden: false
-    description: "device message"
+    isHidden: true
+    description: "device notification message"
     properties:
       valueType: "String"
       readWrite: "RW"
+      scale: ""
+      offset: ""
+      base: ""
 
 deviceCommands:
   -
-    name: values
+    name: testrandfloat32
     readWrite: "R"
     isHidden: false
     resourceOperations:
-        - { deviceResource: "randnum" }
-        - { deviceResource: "ping" }
-        - { deviceResource: "message" }
+      - { deviceResource: "randfloat32" }
+  -
+    name: testrandfloat64
+    readWrite: "R"
+    isHidden: false
+    resourceOperations:
+      - { deviceResource: "randfloat64" }
+  -
+    name: testping
+    readWrite: "R"
+    isHidden: false
+    resourceOperations:
+      - { deviceResource: "ping" }
+  -
+    name: testmessage
+    readWrite: "RW"
+    isHidden: false
+    resourceOperations:
+      - { deviceResource: "message" }
+  -
+    name: randfloat32andfloat64
+    readWrite: "RW"
+    isHidden: false
+    resourceOperations:
+      - { deviceResource: "randfloat32" }
+      - { deviceResource: "randfloat64" }
+
 ```
 
 ### Device Configuration
@@ -174,25 +320,31 @@ deviceCommands:
 Use this configuration file to define devices and schedule jobs.
 device-mqtt generates a relative instance on start-up.
 
-Create the device configuration file, named `mqtt.test.device.config.toml`, as shown below:
+Create the device configuration file, named `mqtt.test.device.toml`, as shown below:
 
 ```toml
 # Pre-define Devices
 [[DeviceList]]
-  Name = "MQTT-Test-Device"
-  ProfileName = "MQTT-Test-Device-Profile"
-  Description = "MQTT device is created for test purpose"
-  Labels = [ "MQTT", "test" ]
+  Name = 'MQTT-test-device'
+  ProfileName = 'Test-Device-MQTT-Profile'
+  Description = 'MQTT device is created for test purpose'
+  Labels = [ 'MQTT', 'test' ]
   [DeviceList.Protocols]
     [DeviceList.Protocols.mqtt]
-       CommandTopic = "CommandTopic"
-    [[DeviceList.AutoEvents]]
-       Interval = "30s"
-       OnChange = false
-       SourceName = "message"
+       # Comment out/remove below to use multi-level topics
+       CommandTopic = 'CommandTopic'
+       # Uncomment below to use multi-level topics
+       # CommandTopic = 'command/MQTT-test-device'
+#    [[DeviceList.AutoEvents]]
+#       Interval = '20s'
+#       OnChange = false
+#       SourceName = 'testrandfloat32'
 ```
 
 - `CommandTopic` is used to publish the GET or SET command request
+
+!!! note
+    **Using Multi-level Topic:** Remember to set `CommandTopic = 'command/MQTT-test-device'.
 
 ## Prepare docker-compose file
 
@@ -250,20 +402,22 @@ Now we're ready to run some commands.
 
 Use the following query to find executable commands:
 
+**Default (single-level) Topic:**
+
 ```json
 $ curl http://localhost:59882/api/v2/device/all | json_pp
 
 {
    "deviceCoreCommands" : [
       {
-         "profileName" : "MQTT-Test-Device-Profile",
-         "deviceName" : "MQTT-Test-Device",
+         "profileName" : "Test-Device-MQTT-Profile",
+         "deviceName" : "MQTT-test-device",
          "coreCommands" : [
             {
                "url" : "http://edgex-core-command:59882",
                "parameters" : [
                   {
-                     "resourceName" : "randnum",
+                     "resourceName" : "randfloat32",
                      "valueType" : "Float32"
                   },
                   {
@@ -277,7 +431,7 @@ $ curl http://localhost:59882/api/v2/device/all | json_pp
                ],
                "get" : true,
                "name" : "values",
-               "path" : "/api/v2/device/name/MQTT-Test-Device/values"
+               "path" : "/api/v2/device/name/MQTT-test-device/values"
             },
             {
                "url" : "http://edgex-core-command:59882",
@@ -289,7 +443,7 @@ $ curl http://localhost:59882/api/v2/device/all | json_pp
                ],
                "get" : true,
                "set" : true,
-               "path" : "/api/v2/device/name/MQTT-Test-Device/message",
+               "path" : "/api/v2/device/name/MQTT-test-device/message",
                "name" : "message"
             }
          ]
@@ -300,13 +454,96 @@ $ curl http://localhost:59882/api/v2/device/all | json_pp
 }
 ```
 
+**Using Multi-level Topic:**
+
+```json
+$ curl http://localhost:59882/api/v2/device/all | json_pp
+{
+   "apiVersion" : "v2",
+   "deviceCoreCommands" : [
+      {
+         "coreCommands" : [
+            {
+               "get" : true,
+               "name" : "testrandfloat32",
+               "parameters" : [
+                  {
+                     "resourceName" : "randfloat32",
+                     "valueType" : "Float32"
+                  }
+               ],
+               "path" : "/api/v2/device/name/MQTT-test-device/testrandfloat32",
+               "url" : "http://edgex-core-command:59882"
+            },
+            {
+               "get" : true,
+               "name" : "testrandfloat64",
+               "parameters" : [
+                  {
+                     "resourceName" : "randfloat64",
+                     "valueType" : "Float64"
+                  }
+               ],
+               "path" : "/api/v2/device/name/MQTT-test-device/testrandfloat64",
+               "url" : "http://edgex-core-command:59882"
+            },
+            {
+               "get" : true,
+               "name" : "testping",
+               "parameters" : [
+                  {
+                     "resourceName" : "ping",
+                     "valueType" : "String"
+                  }
+               ],
+               "path" : "/api/v2/device/name/MQTT-test-device/testping",
+               "url" : "http://edgex-core-command:59882"
+            },
+            {
+               "get" : true,
+               "name" : "testmessage",
+               "parameters" : [
+                  {
+                     "resourceName" : "message",
+                     "valueType" : "String"
+                  }
+               ],
+               "path" : "/api/v2/device/name/MQTT-test-device/testmessage",
+               "set" : true,
+               "url" : "http://edgex-core-command:59882"
+            },
+            {
+               "get" : true,
+               "name" : "randfloat32andfloat64",
+               "parameters" : [
+                  {
+                     "resourceName" : "randfloat32",
+                     "valueType" : "Float32"
+                  },
+                  {
+                     "resourceName" : "randfloat64",
+                     "valueType" : "Float64"
+                  }
+               ],
+               "path" : "/api/v2/device/name/MQTT-test-device/randfloat32andfloat64",
+               "url" : "http://edgex-core-command:59882"
+            }
+         ],
+         "deviceName" : "MQTT-test-device",
+         "profileName" : "Test-Device-MQTT-Profile"
+      }
+   ],
+   "statusCode" : 200
+}
+```
+
 ### Execute SET Command
 
 Execute a SET command according to the url and parameterNames, replacing
 \[host\] with the server IP when running the SET command.
 
 ```
-$ curl http://localhost:59882/api/v2/device/name/MQTT-Test-Device/message \
+$ curl http://localhost:59882/api/v2/device/name/MQTT-test-device/message \
     -H "Content-Type:application/json" -X PUT  \
     -d '{"message":"Hello!"}'
 ```
@@ -315,8 +552,10 @@ $ curl http://localhost:59882/api/v2/device/name/MQTT-Test-Device/message \
 
 Execute a GET command as follows:
 
+**Default (single-level) Topic:**
+
 ```json
-$ curl http://localhost:59882/api/v2/device/name/MQTT-Test-Device/message | json_pp
+$ curl http://localhost:59882/api/v2/device/name/MQTT-test-device/message | json_pp
 
 {
    "event" : {
@@ -325,8 +564,8 @@ $ curl http://localhost:59882/api/v2/device/name/MQTT-Test-Device/message | json
          {
             "resourceName" : "message",
             "binaryValue" : null,
-            "profileName" : "MQTT-Test-Device-Profile",
-            "deviceName" : "MQTT-Test-Device",
+            "profileName" : "Test-Device-MQTT-Profile",
+            "deviceName" : "MQTT-test-device",
             "id" : "a3bb78c5-e76f-49a2-ad9d-b220a86c3e36",
             "value" : "Hello!",
             "valueType" : "String",
@@ -335,15 +574,43 @@ $ curl http://localhost:59882/api/v2/device/name/MQTT-Test-Device/message | json
          }
       ],
       "sourceName" : "message",
-      "deviceName" : "MQTT-Test-Device",
+      "deviceName" : "MQTT-test-device",
       "apiVersion" : "v2",
-      "profileName" : "MQTT-Test-Device-Profile",
+      "profileName" : "Test-Device-MQTT-Profile",
       "id" : "e0b29735-8b39-44d1-8f68-4d7252e14cc7"
    },
    "apiVersion" : "v2",
    "statusCode" : 200
 }
 
+```
+
+**Using Multi-level Topic:**
+
+```json
+{
+   "apiVersion" : "v2",
+   "event" : {
+      "apiVersion" : "v2",
+      "deviceName" : "MQTT-test-device",
+      "id" : "aec027e0-2005-45cd-8ef9-a2f0be2accf3",
+      "origin" : 1629424063084088100,
+      "profileName" : "Test-Device-MQTT-Profile",
+      "readings" : [
+         {
+            "deviceName" : "MQTT-test-device",
+            "id" : "0f491a97-203f-4aea-a57b-4efe6dce885e",
+            "origin" : 1629424063084066500,
+            "profileName" : "Test-Device-MQTT-Profile",
+            "resourceName" : "message",
+            "value" : "Hello!",
+            "valueType" : "String"
+         }
+      ],
+      "sourceName" : "message"
+   },
+   "statusCode" : 200
+}
 ```
 
 ## Schedule Job
@@ -361,6 +628,8 @@ After the service starts, query core-data's reading API. The results
 show that the service auto-executes the command every 30 secs, as shown
 below:
 
+**Default (single-level) Topic:**
+
 ```json
 $ curl http://localhost:59880/api/v2/reading/resourceName/message | json_pp
 
@@ -374,8 +643,8 @@ $ curl http://localhost:59880/api/v2/reading/resourceName/message | json_pp
          "binaryValue" : null,
          "resourceName" : "message",
          "origin" : 1624418361324331392,
-         "profileName" : "MQTT-Test-Device-Profile",
-         "deviceName" : "MQTT-Test-Device",
+         "profileName" : "Test-Device-MQTT-Profile",
+         "deviceName" : "MQTT-test-device",
          "valueType" : "String"
       },
       {
@@ -384,9 +653,9 @@ $ curl http://localhost:59880/api/v2/reading/resourceName/message | json_pp
          "resourceName" : "message",
          "value" : "test-message",
          "id" : "1da58cb7-2bf4-47f0-bbb8-9519797149a2",
-         "deviceName" : "MQTT-Test-Device",
+         "deviceName" : "MQTT-test-device",
          "valueType" : "String",
-         "profileName" : "MQTT-Test-Device-Profile",
+         "profileName" : "Test-Device-MQTT-Profile",
          "origin" : 1624418330822988843
       },
       ...
@@ -396,6 +665,28 @@ $ curl http://localhost:59880/api/v2/reading/resourceName/message | json_pp
 
 
 ```
+
+**Using Multi-level Topic:**
+
+```json
+{
+   "apiVersion" : "v2",
+   "readings" : [
+      {
+         "deviceName" : "MQTT-test-device",
+         "id" : "d01bce60-68f5-4baa-a339-5fb34951e81d",
+         "origin" : 1629424055756053600,
+         "profileName" : "Test-Device-MQTT-Profile",
+         "resourceName" : "message",
+         "value" : "Hello!",
+         "valueType" : "String"
+      },
+      ...
+   ],
+   "statusCode" : 200
+}
+```
+
 
 ## Async Device Reading
 
@@ -412,37 +703,69 @@ The data format contains the following values:
 The following results show that the mock device sent the reading every
 15 secs:
 
+**Default (single-level) Topic:**
+
 ```json
-$ curl http://localhost:59880/api/v2/reading/resourceName/randnum | json_pp
+$ curl http://localhost:59880/api/v2/reading/resourceName/randfloat32 | json_pp
 
 {
    "readings" : [
       {
          "origin" : 1624418475007110946,
          "valueType" : "Float32",
-         "deviceName" : "MQTT-Test-Device",
+         "deviceName" : "MQTT-test-device",
          "id" : "9b3d337e-8a8a-4a6c-8018-b4908b57abb8",
          "binaryValue" : null,
-         "resourceName" : "randnum",
-         "profileName" : "MQTT-Test-Device-Profile",
+         "resourceName" : "randfloat32",
+         "profileName" : "Test-Device-MQTT-Profile",
          "mediaType" : "",
          "value" : "2.630000e+01"
       },
       {
-         "deviceName" : "MQTT-Test-Device",
+         "deviceName" : "MQTT-test-device",
          "valueType" : "Float32",
          "id" : "06918cbb-ada0-4752-8877-0ef8488620f6",
          "origin" : 1624418460007833720,
          "mediaType" : "",
-         "profileName" : "MQTT-Test-Device-Profile",
+         "profileName" : "Test-Device-MQTT-Profile",
          "value" : "2.570000e+01",
-         "resourceName" : "randnum",
+         "resourceName" : "randfloat32",
          "binaryValue" : null
       },
       ...
    ],
    "statusCode" : 200,
    "apiVersion" : "v2"
+}
+```
+
+**Using Multi-level Topic:**
+
+```json
+{
+   "apiVersion" : "v2",
+   "readings" : [
+      {
+         "deviceName" : "MQTT-test-device",
+         "id" : "3b1e197c-64ad-4f3d-a344-5d375147cba7",
+         "origin" : 1629425475004246800,
+         "profileName" : "Test-Device-MQTT-Profile",
+         "resourceName" : "randfloat32",
+         "value" : "2.760000e+01",
+         "valueType" : "Float32"
+      },
+      {
+         "deviceName" : "MQTT-test-device",
+         "id" : "9c9061c8-3cf6-4aa4-9ab2-fc660efb6870",
+         "origin" : 1629425460004623400,
+         "profileName" : "Test-Device-MQTT-Profile",
+         "resourceName" : "randfloat32",
+         "value" : "2.590000e+01",
+         "valueType" : "Float32"
+      },
+      ...
+   ],
+   "statusCode" : 200
 }
 ```
 
@@ -464,9 +787,13 @@ MQTT Device Service has the following configurations to implement the MQTT proto
 | MQTTBrokerInfo.ConnRetryWaitTime     | 5             | The wait time(seconds) when retry to establish the MQTT connection   |
 | MQTTBrokerInfo.AuthMode              | none          | Indicates what to use when connecting to the broker. Must be one of "none" , "usernamepassword" |
 | MQTTBrokerInfo.CredentialsPath       | credentials   | Name of the path in secret provider to retrieve your secrets. Must be non-blank. |\
-| MQTTBrokerInfo.IncomingTopic         | DataTopic     | IncomingTopic is used to receive the async value |
-| MQTTBrokerInfo.responseTopic         | ResponseTopic | ResponseTopic is used to receive the command response from the device |
+| MQTTBrokerInfo.IncomingTopic         | DataTopic (incoming/data/#) | IncomingTopic is used to receive the async value |
+| MQTTBrokerInfo.responseTopic         | ResponseTopic (command/response/#) | ResponseTopic is used to receive the command response from the device |
+| MQTTBrokerInfo.UseTopicLevels        | false (true)  | Boolean setting to use multi-level topics |
 | MQTTBrokerInfo.Writable.ResponseFetchInterval | 500  | ResponseFetchInterval specifies the retry interval(milliseconds) to fetch the command response from the MQTT broker |
+
+!!! note
+    **Using Multi-level Topic:** Remember to set defaults in parentheses in the table above.
 
 The user can override these configurations by `environment variable` to meet their requirement, for example:
 
